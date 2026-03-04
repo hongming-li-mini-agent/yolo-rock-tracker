@@ -72,10 +72,14 @@ async function init() {
         if (e.key === 'Enter') confirmNaming();
     });
     
-    // Load model
+    // Load model from GitHub raw (CORS enabled)
+    const MODEL_URL = 'https://raw.githubusercontent.com/hongming-li-mini-agent/yolo-rock-tracker/main/yolov8n.onnx';
     statusEl.textContent = 'Loading model...';
     try {
-        const modelBuffer = await fetch('yolov8n.onnx').then(r => r.arrayBuffer());
+        const modelBuffer = await fetch(MODEL_URL).then(r => {
+            if (!r.ok) throw new Error('Failed to fetch model');
+            return r.arrayBuffer();
+        });
         session = await ort.InferenceSession.create(modelBuffer);
         statusEl.textContent = 'Model loaded';
         console.log('Model loaded successfully');
