@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Stone Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+        
+        <div id="controls">
+            <button id="btn-start">▶ Start</button>
+            <button id="btn-clear">Clear All</button>
+            <div id="status">Loading model...</div>
+        </div>
+        
+        <div id="objects-panel">
+            <h3>Tracked Objects</h3>
+            <div id="objects-list"></div>
+        </div>
+        
+        <div id="instructions">
+            Click and drag to select an object to track
+        </div>
+    </div>
+    
+    <div id="naming-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Name this object</h3>
+            <input type="text" id="object-name" placeholder="e.g., Stone 1" maxlength="20">
+            <div class="modal-buttons">
+                <button id="btn-cancel">Cancel</button>
+                <button id="btn-confirm">Track</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+    <script src="tracker.js"></script>
+</body>
+</html>
