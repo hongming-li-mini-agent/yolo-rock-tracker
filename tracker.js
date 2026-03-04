@@ -170,18 +170,37 @@ async function detect() {
     inputCtx.scale(-1, 1);
     inputCtx.drawImage(video, 0, 0, w, h, 0, 0, size, size);
     
-    const inputData = new Float32Array(1 * 3 * size * size);
+    const inputData = new Float32Array(3 * size * size);
     const imageData = inputCtx.getImageData(0, 0, size, size);
     
     // Normalize to [0, 1] then to [-1, 1]
-    for (let i = 0; i < size * size * 3; i++) {
-        inputData[i] = (imageData.data[i] / 255.0) * 2 - 1;
+    // YOLO expects CHW format (channels first)
+    const rOffset = 0;
+    const gOffset = size * size;
+    const bOffset = 2 * size * size;
+    
+    for (let i = 0; i < size * size; i++) {
+        const idx = i * 4;
+        // CHW format: all R, then all G, then all B
+        inputData[rOffset + i] = (imageData.data[idx] / 255.0) * 2 - 1;
+        inputData[gOffset + i] = (imageData.data[idx + 1] / 255.0) * 2 - 1;
+        inputData[bOffset + i] = (imageData.data[idx + 2] / 255.0) * 2 - 1;
     }
+    
+    // Create tensor with correct shape [1, 3, 640, 640]
+    const inputTensor = new ort.Tensor('float32', inputData, [1, 3, size, size]);
+    
+    // Get the actual input name from the model
+    const inputName = session.inputNames[0];
+    console.log('Model input names:', session.inputNames);
+    console.log('Model output names:', session.outputNames);
     
     // Run inference
     try {
-        const output = await session.run({ images: inputData });
-        const outputData = output[Object.keys(output)[0]].data;
+        const feeds = {};
+        feeds[inputName] = inputTensor;
+        const output = await session.run(feeds);
+        const outputData = output[session.outputNames[0]].data;
         
         // Parse YOLO output
         detections = parseYOLOOutput(outputData, size, w, h);
@@ -393,16 +412,19 @@ function draw() {
         }
     });
     
-    // Draw selection box
+    // Draw selection box (mirror to match video)
     if (isDrawing && drawStart && drawEnd) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 5]);
-        const x = Math.min(drawStart.x, drawEnd.x);
-        const y = Math.min(drawStart.y, drawEnd.y);
-        const w = Math.abs(drawEnd.x - drawStart.x);
-        const h = Math.abs(drawEnd.y - drawStart.y);
-        ctx.strokeRect(x, y, w, h);
+        // Mirror the x coordinates to match the mirrored video
+        const x1 = canvas.width - Math.max(drawStart.x, drawEnd.x);
+        const x2 = canvas.width - Math.min(drawStart.x, drawEnd.x);
+        const y1 = Math.min(drawStart.y, drawEnd.y);
+        const y2 = Math.max(drawStart.y, drawEnd.y);
+        const w = x2 - x1;
+        const h = y2 - y1;
+        ctx.strokeRect(x1, y1, w, h);
         ctx.setLineDash([]);
     }
     
@@ -410,16 +432,26 @@ function draw() {
 }
 
 // Mouse handlers
+function getCanvasCoordinates(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+    };
+}
+
 function onMouseDown(e) {
     if (!isRunning) return;
     isDrawing = true;
-    drawStart = { x: e.clientX, y: e.clientY };
-    drawEnd = { x: e.clientX, y: e.clientY };
+    const coords = getCanvasCoordinates(e);
+    drawStart = { x: coords.x, y: coords.y };
+    drawEnd = { x: coords.x, y: coords.y };
 }
 
 function onMouseMove(e) {
     if (!isDrawing) return;
-    drawEnd = { x: e.clientX, y: e.clientY };
+    const coords = getCanvasCoordinates(e);
+    drawEnd = { x: coords.x, y: coords.y };
 }
 
 function onMouseUp(e) {
@@ -427,24 +459,31 @@ function onMouseUp(e) {
     isDrawing = false;
     
     // Get box in video coordinates
+    // Account for video mirroring: canvas is scaled with scaleX(-1)
     const scaleX = canvas.width / video.videoWidth;
     const scaleY = canvas.height / video.videoHeight;
     const scale = Math.min(scaleX, scaleY);
-    const offsetX = (canvas.width - video.videoWidth * scale) / 2;
+    
+    // The video is mirrored horizontally, so we need to flip x coordinates
+    const videoWidth = video.videoWidth;
+    const offsetX = (canvas.width - videoWidth * scale) / 2;
     const offsetY = (canvas.height - video.videoHeight * scale) / 2;
     
-    const x1 = Math.min(drawStart.x, drawEnd.x);
-    const y1 = Math.min(drawStart.y, drawEnd.y);
-    const x2 = Math.max(drawStart.x, drawEnd.x);
-    const y2 = Math.max(drawStart.y, drawEnd.y);
+    // Convert from canvas (mirrored) to video coordinates
+    const toVideoX = (canvasX) => videoWidth - (canvasX - offsetX) / scale;
+    const toVideoY = (canvasY) => (canvasY - offsetY) / scale;
+    
+    const x1 = toVideoX(Math.min(drawStart.x, drawEnd.x));
+    const y1 = toVideoY(Math.min(drawStart.y, drawEnd.y));
+    const x2 = toVideoX(Math.max(drawStart.x, drawEnd.x));
+    const y2 = toVideoY(Math.max(drawStart.y, drawEnd.y));
     
     const box = {
-        x1: (x1 - offsetX) / scale,
-        y1: (y1 - offsetY) / scale,
-        x2: (x2 - offsetX) / scale,
-        y2: (y2 - offsetY) / scale
+        x1: Math.max(0, x1),
+        y1: Math.max(0, y1),
+        x2: Math.min(videoWidth, x2),
+        y2: Math.min(video.videoHeight, y2)
     };
-    
     if (box.x2 - box.x1 > 20 && box.y2 - box.y1 > 20) {
         selectedBox = box;
         nameInput.value = `Stone ${nextObjectId++}`;
@@ -462,10 +501,12 @@ function onDoubleClick(e) {
     const scaleX = canvas.width / video.videoWidth;
     const scaleY = canvas.height / video.videoHeight;
     const scale = Math.min(scaleX, scaleY);
-    const offsetX = (canvas.width - video.videoWidth * scale) / 2;
+    const videoWidth = video.videoWidth;
+    const offsetX = (canvas.width - videoWidth * scale) / 2;
     const offsetY = (canvas.height - video.videoHeight * scale) / 2;
     
-    const clickX = (e.clientX - offsetX) / scale;
+    // Account for mirroring
+    const clickX = videoWidth - (e.clientX - offsetX) / scale;
     const clickY = (e.clientY - offsetY) / scale;
     
     trackedObjects = trackedObjects.filter(obj => {
