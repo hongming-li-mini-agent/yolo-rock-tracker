@@ -40,6 +40,7 @@ const videoEl = document.getElementById('video');
 const canvasEl = document.getElementById('canvas');
 const statusEl = document.getElementById('status');
 const btnStart = document.getElementById('btn-start');
+const btnTest = document.getElementById('btn-test');
 const btnClear = document.getElementById('btn-clear');
 const objectsList = document.getElementById('objects-list');
 const instructionsEl = document.getElementById('instructions');
@@ -47,6 +48,9 @@ const modalEl = document.getElementById('naming-modal');
 const nameInput = document.getElementById('object-name');
 const btnConfirm = document.getElementById('btn-confirm');
 const btnCancel = document.getElementById('btn-cancel');
+
+// Debug mode: auto-track first detected object
+let debugMode = false;
 
 // Initialize
 async function init() {
@@ -60,6 +64,7 @@ async function init() {
     
     // Event listeners
     btnStart.addEventListener('click', toggleTracking);
+    btnTest.addEventListener('click', toggleTestMode);
     btnClear.addEventListener('click', clearAll);
     canvas.addEventListener('mousedown', onMouseDown);
     canvas.addEventListener('mousemove', onMouseMove);
@@ -103,6 +108,21 @@ function toggleTracking() {
     }
 }
 
+// Toggle test mode - auto-track first detected object
+function toggleTestMode() {
+    debugMode = !debugMode;
+    if (debugMode) {
+        btnTest.classList.add('active');
+        btnTest.textContent = '⏹ Stop';
+        if (!isRunning) {
+            startTracking();
+        }
+    } else {
+        btnTest.classList.remove('active');
+        btnTest.textContent = '🧪 Test';
+    }
+}
+
 async function startTracking() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -136,14 +156,12 @@ function stopTracking() {
     btnStart.classList.remove('active');
 }
 
-// Detection loop - only run if tracking or selecting
+// Detection loop - only run if tracking or selecting or debug mode
 async function detectLoop() {
     if (!isRunning) return;
     
-    // Only run detection when:
-    // 1. There are tracked objects, OR
-    // 2. User is drawing a selection box
-    const shouldDetect = trackedObjects.length > 0 || isDrawing;
+    // Debug mode: always run detection
+    const shouldDetect = debugMode || trackedObjects.length > 0 || isDrawing;
     
     if (!shouldDetect) {
         // Just draw the video without detection
@@ -156,6 +174,23 @@ async function detectLoop() {
     if (now - lastDetectionTime >= CONFIG.detectionInterval) {
         await detect();
         lastDetectionTime = now;
+        
+        // Debug mode: auto-track first detection
+        if (debugMode && detections.length > 0 && trackedObjects.length === 0) {
+            const det = detections[0];
+            const color = COLORS[nextObjectId % COLORS.length];
+            trackedObjects.push({
+                id: nextObjectId++,
+                name: `Object ${nextObjectId}`,
+                color: color,
+                box: { ...det },
+                confidence: det.confidence,
+                trajectory: [],
+                lastSeen: now,
+                isTracking: true
+            });
+            statusEl.textContent = `Tracking: Object ${nextObjectId - 1}`;
+        }
     }
     
     draw();
