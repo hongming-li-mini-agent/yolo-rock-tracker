@@ -9,7 +9,7 @@ const COLORS = [
 
 // Configuration
 const CONFIG = {
-    confidenceThreshold: 0.5,
+    confidenceThreshold: 0.6,
     iouThreshold: 0.3,
     detectionInterval: 100, // ms between detections
     trajectoryMinDistance: 10, // min pixels between points
@@ -136,9 +136,21 @@ function stopTracking() {
     btnStart.classList.remove('active');
 }
 
-// Detection loop
+// Detection loop - only run if tracking or selecting
 async function detectLoop() {
     if (!isRunning) return;
+    
+    // Only run detection when:
+    // 1. There are tracked objects, OR
+    // 2. User is drawing a selection box
+    const shouldDetect = trackedObjects.length > 0 || isDrawing;
+    
+    if (!shouldDetect) {
+        // Just draw the video without detection
+        draw();
+        requestAnimationFrame(detectLoop);
+        return;
+    }
     
     const now = Date.now();
     if (now - lastDetectionTime >= CONFIG.detectionInterval) {
@@ -363,8 +375,9 @@ function draw() {
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
     
-    // Draw detections (if no tracked objects)
-    if (trackedObjects.length === 0) {
+    // Draw detections only when user is selecting (drawing a box)
+    // Don't show all detections by default to avoid clutter and low FPS
+    if (isDrawing && trackedObjects.length === 0) {
         detections.forEach(det => {
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.lineWidth = 1;
